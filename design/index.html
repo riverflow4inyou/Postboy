@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Postboy · 桌面原型 v2</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 顶部标题栏 -->
+  <header class="titlebar">
+    <div class="traffic-lights">
+      <span class="light close"></span>
+      <span class="light min"></span>
+      <span class="light max"></span>
+    </div>
+    <div class="title">Postboy</div>
+    <div class="title-actions">
+      <button class="icon-btn" title="新建窗口">＋</button>
+      <button class="icon-btn" title="设置">⚙</button>
+    </div>
+  </header>
+
+  <!-- 主体：导航栏 + 侧边栏 + 拖拽条 + 工作区 -->
+  <main class="app" id="app">
+    <!-- 最左侧的功能切换条 -->
+    <nav class="nav-rail">
+      <button class="rail-btn active" data-target="collections" title="集合">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M4 5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/>
+          <path d="M14 3v5h5"/>
+        </svg>
+        <span>集合</span>
+      </button>
+      <button class="rail-btn" data-target="environments" title="环境">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+        </svg>
+        <span>环境</span>
+      </button>
+      <button class="rail-btn" title="历史">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M12 7v5l3 2"/>
+        </svg>
+        <span>历史</span>
+      </button>
+      <div class="rail-spacer"></div>
+      <div class="env-indicator" title="当前生效环境">
+        <span class="dot"></span>
+        <span>Dev</span>
+      </div>
+    </nav>
+
+    <!-- 左侧主面板 -->
+    <aside class="sidebar" id="sidebar" style="width: 280px;">
+      <!-- 集合面板 -->
+      <section class="panel active" id="panel-collections">
+        <div class="panel-header">
+          <div class="search">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+            </svg>
+            <input type="text" placeholder="搜索集合 / 请求" />
+          </div>
+          <button class="btn primary sm" title="新建集合">
+            <span class="btn-icon">＋</span><span>新建</span>
+          </button>
+          <!-- ★ 新增：导入按钮（支持 cURL 导入） -->
+          <button class="btn ghost sm" id="btn-import" title="导入 cURL / OpenAPI">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>
+            </svg>
+            <span>导入</span>
+          </button>
+        </div>
+
+        <div class="tree">
+          <div class="tree-node folder open">
+            <div class="tree-row">
+              <span class="caret">▾</span>
+              <span class="folder-icon">📁</span>
+              <span class="tree-label">用户中心 API</span>
+              <span class="tree-actions">
+                <button class="icon-btn xs" title="新增请求">＋</button>
+                <button class="icon-btn xs" title="更多">⋯</button>
+              </span>
+            </div>
+            <div class="tree-children">
+              <div class="tree-row request active">
+                <span class="method get">GET</span>
+                <span class="tree-label">获取用户信息</span>
+              </div>
+              <div class="tree-row request">
+                <span class="method post">POST</span>
+                <span class="tree-label">创建用户</span>
+              </div>
+              <div class="tree-row request">
+                <span class="method put">PUT</span>
+                <span class="tree-label">更新用户</span>
+              </div>
+              <div class="tree-row request">
+                <span class="method delete">DEL</span>
+                <span class="tree-label">删除用户</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tree-node folder">
+            <div class="tree-row">
+              <span class="caret">▸</span>
+              <span class="folder-icon">📁</span>
+              <span class="tree-label">订单服务</span>
+              <span class="tree-actions">
+                <button class="icon-btn xs" title="新增请求">＋</button>
+                <button class="icon-btn xs" title="更多">⋯</button>
+              </span>
+            </div>
+          </div>
+
+          <div class="tree-node folder">
+            <div class="tree-row">
+              <span class="caret">▸</span>
+              <span class="folder-icon">📁</span>
+              <span class="tree-label">支付网关</span>
+              <span class="tree-actions">
+                <button class="icon-btn xs" title="新增请求">＋</button>
+                <button class="icon-btn xs" title="更多">⋯</button>
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 环境面板 -->
+      <section class="panel" id="panel-environments">
+        <div class="panel-header">
+          <div class="search">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+            </svg>
+            <input type="text" placeholder="搜索环境" />
+          </div>
+          <button class="btn primary sm">＋ 新建</button>
+        </div>
+        <div class="env-list">
+          <div class="env-item active">
+            <span class="dot global"></span>
+            <span class="env-name">Globals（全局）</span>
+            <span class="env-tag">KV</span>
+          </div>
+          <div class="env-item">
+            <span class="dot dev"></span>
+            <span class="env-name">Dev</span>
+            <span class="env-tag">激活</span>
+          </div>
+          <div class="env-item">
+            <span class="dot stg"></span>
+            <span class="env-name">Staging</span>
+          </div>
+          <div class="env-item">
+            <span class="dot prd"></span>
+            <span class="env-name">Production</span>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ★ 新增：垂直分割条（拖拽改变 sidebar 宽度） -->
+    <div class="v-splitter" id="v-splitter" title="拖动调整宽度"></div>
+
+    <!-- 工作区 -->
+    <section class="workspace" id="workspace">
+      <!-- 标签栏 -->
+      <div class="tabs">
+        <div class="tab active">
+          <span class="method get">GET</span>
+          <span class="tab-title">获取用户信息</span>
+          <button class="tab-close" title="关闭">×</button>
+        </div>
+        <div class="tab">
+          <span class="method post">POST</span>
+          <span class="tab-title">创建用户</span>
+          <button class="tab-close" title="关闭">×</button>
+        </div>
+        <div class="tab new" title="新建请求">＋</div>
+      </div>
+
+      <!-- 请求编辑区 -->
+      <div class="request-pane" id="request-pane" style="height: 50%;">
+        <!-- 第一行：集合/请求名称 + Send -->
+        <div class="row breadcrumb-row">
+          <div class="breadcrumb">
+            <span class="crumb">用户中心 API</span>
+            <span class="sep">/</span>
+            <span class="crumb editable" contenteditable="true" spellcheck="false">获取用户信息</span>
+          </div>
+          <div class="actions">
+            <button class="btn ghost sm" title="保存">保存</button>
+            <div class="send-group">
+              <button class="btn primary">Send</button>
+              <button class="btn primary split" id="send-more" title="更多发送方式">▾</button>
+              <div class="dropdown" id="send-dropdown">
+                <div class="dropdown-item">
+                  <span class="dd-icon">↗</span>
+                  <span>Send</span>
+                  <span class="kbd">⌘↵</span>
+                </div>
+                <div class="dropdown-item">
+                  <span class="dd-icon">⤓</span>
+                  <span>Send and Download</span>
+                  <span class="kbd">⌘⇧↵</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 第二行：方法 + URL（自定义下拉） -->
+        <div class="row url-row">
+          <!-- ★ 自定义方法下拉：选中态 / 列表项样式一致 -->
+          <div class="cdrop method-cdrop" data-value="GET" id="method-dd">
+            <button class="cdrop-trigger">
+              <span class="dot-method get"></span>
+              <span class="cdrop-text">GET</span>
+              <span class="cdrop-caret">▾</span>
+            </button>
+            <div class="cdrop-menu">
+              <div class="cdrop-item selected" data-value="GET">
+                <span class="dot-method get"></span><span>GET</span>
+              </div>
+              <div class="cdrop-item" data-value="POST">
+                <span class="dot-method post"></span><span>POST</span>
+              </div>
+              <div class="cdrop-item" data-value="PUT">
+                <span class="dot-method put"></span><span>PUT</span>
+              </div>
+              <div class="cdrop-item" data-value="DELETE">
+                <span class="dot-method delete"></span><span>DELETE</span>
+              </div>
+              <div class="cdrop-item" data-value="PATCH">
+                <span class="dot-method patch"></span><span>PATCH</span>
+              </div>
+              <div class="cdrop-item" data-value="HEAD">
+                <span class="dot-method head"></span><span>HEAD</span>
+              </div>
+              <div class="cdrop-item" data-value="OPTIONS">
+                <span class="dot-method options"></span><span>OPTIONS</span>
+              </div>
+            </div>
+          </div>
+          <div class="url-input">
+            <input type="text" id="url-input" value="www.baidu.com" placeholder="输入请求 URL（支持裸域名/IP，自动补全 http://）" />
+            <!-- ★ 协议自动补全提示 -->
+            <span class="url-hint" id="url-hint">将自动补全 <b>http://</b></span>
+          </div>
+        </div>
+
+        <!-- 第三行：参数项 Tab -->
+        <div class="param-tabs">
+          <div class="param-tab active" data-tab="params">Params <span class="badge">3</span></div>
+          <div class="param-tab" data-tab="headers">Headers <span class="badge">2</span></div>
+          <div class="param-tab" data-tab="body">Body</div>
+          <div class="param-tab" data-tab="auth">Authorization</div>
+          <div class="param-tab" data-tab="tests">Tests</div>
+        </div>
+
+        <!-- Params -->
+        <div class="param-content active" id="tab-params">
+          <table class="kv-table">
+            <thead>
+              <tr><th class="check"></th><th>Key</th><th>Value</th><th>Description</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="check"><input type="checkbox" checked /></td>
+                <td><input type="text" value="id" /></td>
+                <td><input type="text" value="1024" /></td>
+                <td><input type="text" value="用户 ID" /></td>
+                <td><button class="icon-btn xs">×</button></td>
+              </tr>
+              <tr>
+                <td class="check"><input type="checkbox" checked /></td>
+                <td><input type="text" value="include" /></td>
+                <td><input type="text" value="profile,settings" /></td>
+                <td><input type="text" value="包含的关联数据" /></td>
+                <td><button class="icon-btn xs">×</button></td>
+              </tr>
+              <tr>
+                <td class="check"><input type="checkbox" /></td>
+                <td><input type="text" value="lang" /></td>
+                <td><input type="text" value="zh-CN" /></td>
+                <td><input type="text" placeholder="" /></td>
+                <td><button class="icon-btn xs">×</button></td>
+              </tr>
+              <tr class="empty">
+                <td class="check"><input type="checkbox" /></td>
+                <td><input type="text" placeholder="Key" /></td>
+                <td><input type="text" placeholder="Value" /></td>
+                <td><input type="text" placeholder="Description" /></td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Headers -->
+        <div class="param-content" id="tab-headers">
+          <table class="kv-table">
+            <thead>
+              <tr><th class="check"></th><th>Key</th><th>Value</th><th>Description</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="check"><input type="checkbox" checked /></td>
+                <td><input type="text" value="Content-Type" /></td>
+                <td><input type="text" value="application/json" /></td>
+                <td><input type="text" /></td>
+                <td><button class="icon-btn xs">×</button></td>
+              </tr>
+              <tr>
+                <td class="check"><input type="checkbox" checked /></td>
+                <td><input type="text" value="Authorization" /></td>
+                <td><input type="text" value="Bearer {{token}}" /></td>
+                <td><input type="text" /></td>
+                <td><button class="icon-btn xs">×</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Body -->
+        <div class="param-content" id="tab-body">
+          <div class="body-types">
+            <label class="radio"><input type="radio" name="bt"/> none</label>
+            <label class="radio"><input type="radio" name="bt"/> form-data</label>
+            <label class="radio"><input type="radio" name="bt"/> x-www-form-urlencoded</label>
+            <label class="radio"><input type="radio" name="bt" checked /> raw</label>
+            <label class="radio"><input type="radio" name="bt"/> binary</label>
+
+            <!-- ★ raw 内容类型：自定义下拉，与方法下拉风格一致 -->
+            <div class="cdrop raw-cdrop" data-value="JSON" id="raw-dd">
+              <button class="cdrop-trigger">
+                <span class="lang-tag json">JSON</span>
+                <span class="cdrop-caret">▾</span>
+              </button>
+              <div class="cdrop-menu">
+                <div class="cdrop-item" data-value="Text"><span class="lang-tag text">TEXT</span><span>Text</span></div>
+                <div class="cdrop-item selected" data-value="JSON"><span class="lang-tag json">JSON</span><span>JSON</span></div>
+                <div class="cdrop-item" data-value="XML"><span class="lang-tag xml">XML</span><span>XML</span></div>
+                <div class="cdrop-item" data-value="HTML"><span class="lang-tag html">HTML</span><span>HTML</span></div>
+                <div class="cdrop-item" data-value="JavaScript"><span class="lang-tag js">JS</span><span>JavaScript</span></div>
+              </div>
+            </div>
+
+            <div class="body-actions">
+              <button class="icon-btn xs" title="美化">{ }</button>
+              <button class="icon-btn xs" title="清空">⌫</button>
+            </div>
+          </div>
+
+          <div class="code-editor">
+            <div class="line-numbers">
+              <span>1</span><span>2</span><span>3</span><span>4</span>
+              <span>5</span><span>6</span><span>7</span><span>8</span>
+            </div>
+            <pre class="code"><span class="punc">{</span>
+  <span class="key">"name"</span><span class="punc">:</span> <span class="str">"Alice"</span><span class="punc">,</span>
+  <span class="key">"email"</span><span class="punc">:</span> <span class="str">"alice@example.com"</span><span class="punc">,</span>
+  <span class="key">"age"</span><span class="punc">:</span> <span class="num">28</span><span class="punc">,</span>
+  <span class="key">"tags"</span><span class="punc">:</span> <span class="punc">[</span><span class="str">"vip"</span><span class="punc">,</span> <span class="str">"beta"</span><span class="punc">]</span><span class="punc">,</span>
+  <span class="key">"active"</span><span class="punc">:</span> <span class="bool">true</span>
+<span class="punc">}</span></pre>
+          </div>
+        </div>
+
+        <div class="param-content" id="tab-auth">
+          <div class="placeholder">在此配置鉴权方式：Bearer Token、Basic Auth、API Key …</div>
+        </div>
+        <div class="param-content" id="tab-tests">
+          <div class="placeholder">在此编写测试脚本（响应断言、变量提取）</div>
+        </div>
+      </div>
+
+      <!-- ★ 水平分割条（可拖拽，调整请求/响应区高度） -->
+      <div class="h-splitter" id="h-splitter" title="拖动调整高度">
+        <span class="grip"></span>
+      </div>
+
+      <!-- 响应区 -->
+      <div class="response-pane" id="response-pane">
+        <div class="response-meta">
+          <div class="meta-left">
+            <span class="status ok">200 OK</span>
+            <span class="meta-item">Time <b>128 ms</b></span>
+            <span class="meta-item">Size <b>1.4 KB</b></span>
+          </div>
+          <div class="meta-right">
+            <button class="icon-btn xs" title="复制">⧉</button>
+            <button class="icon-btn xs" title="保存">⤓</button>
+          </div>
+        </div>
+
+        <div class="param-tabs sm">
+          <div class="param-tab active">Body</div>
+          <div class="param-tab">Headers <span class="badge">8</span></div>
+          <div class="param-tab">Cookies</div>
+          <div class="param-tab">Test Results</div>
+        </div>
+
+        <div class="response-body">
+          <div class="resp-toolbar">
+            <div class="seg">
+              <button class="seg-btn active">Pretty</button>
+              <button class="seg-btn">Raw</button>
+              <button class="seg-btn">Preview</button>
+            </div>
+            <!-- ★ 响应类型也改成自定义下拉 -->
+            <div class="cdrop resp-cdrop sm" data-value="JSON">
+              <button class="cdrop-trigger">
+                <span class="lang-tag json">JSON</span>
+                <span class="cdrop-caret">▾</span>
+              </button>
+              <div class="cdrop-menu">
+                <div class="cdrop-item selected" data-value="JSON"><span class="lang-tag json">JSON</span><span>JSON</span></div>
+                <div class="cdrop-item" data-value="XML"><span class="lang-tag xml">XML</span><span>XML</span></div>
+                <div class="cdrop-item" data-value="HTML"><span class="lang-tag html">HTML</span><span>HTML</span></div>
+                <div class="cdrop-item" data-value="Text"><span class="lang-tag text">TEXT</span><span>Text</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="code-editor">
+            <div class="line-numbers">
+              <span>1</span><span>2</span><span>3</span><span>4</span>
+              <span>5</span><span>6</span><span>7</span><span>8</span>
+              <span>9</span><span>10</span>
+            </div>
+            <pre class="code"><span class="punc">{</span>
+  <span class="key">"code"</span><span class="punc">:</span> <span class="num">0</span><span class="punc">,</span>
+  <span class="key">"message"</span><span class="punc">:</span> <span class="str">"ok"</span><span class="punc">,</span>
+  <span class="key">"data"</span><span class="punc">:</span> <span class="punc">{</span>
+    <span class="key">"id"</span><span class="punc">:</span> <span class="num">1024</span><span class="punc">,</span>
+    <span class="key">"name"</span><span class="punc">:</span> <span class="str">"Alice"</span><span class="punc">,</span>
+    <span class="key">"email"</span><span class="punc">:</span> <span class="str">"alice@example.com"</span><span class="punc">,</span>
+    <span class="key">"createdAt"</span><span class="punc">:</span> <span class="str">"2026-05-01T10:23:11Z"</span>
+  <span class="punc">}</span>
+<span class="punc">}</span></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 状态栏 -->
+  <footer class="statusbar">
+    <span>● 已连接</span>
+    <span class="dot-sep">·</span>
+    <span>本地存储：~/.postboy/data.db</span>
+    <span class="dot-sep">·</span>
+    <span>v0.2.0</span>
+    <div class="status-right">
+      <span>UTF-8</span>
+      <span class="dot-sep">·</span>
+      <span>JSON</span>
+    </div>
+  </footer>
+
+  <!-- ★ cURL 导入弹窗 -->
+  <div class="modal-mask" id="modal-import" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>
+          </svg>
+          导入请求
+        </div>
+        <button class="icon-btn" id="modal-close" title="关闭">×</button>
+      </div>
+
+      <div class="modal-tabs">
+        <div class="m-tab active">cURL</div>
+        <div class="m-tab">OpenAPI / Swagger</div>
+        <div class="m-tab">HAR</div>
+        <div class="m-tab">Postman 集合</div>
+      </div>
+
+      <div class="modal-body">
+        <label class="form-label">粘贴 cURL 命令</label>
+        <div class="curl-input-wrap">
+          <textarea id="curl-input" placeholder='例：curl -X POST "https://api.example.com/v1/users" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer xxx" \
+  -d &#39;{"name":"Alice","age":28}&#39;'>curl -X POST "https://api.example.com/v1/users" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer xxxxxx" \
+  -d '{"name":"Alice","age":28}'</textarea>
+          <div class="curl-status valid" id="curl-status">
+            <span class="status-dot"></span>
+            <span class="status-text">合法的 cURL · 已识别 1 个请求</span>
+          </div>
+        </div>
+
+        <!-- 解析预览 -->
+        <div class="parse-preview">
+          <div class="pp-title">解析结果预览</div>
+          <div class="pp-row">
+            <span class="pp-label">方法</span>
+            <span class="method post">POST</span>
+          </div>
+          <div class="pp-row">
+            <span class="pp-label">URL</span>
+            <span class="pp-url">https://api.example.com/v1/users</span>
+          </div>
+          <div class="pp-row">
+            <span class="pp-label">Headers</span>
+            <span class="pp-tag">Content-Type</span>
+            <span class="pp-tag">Authorization</span>
+          </div>
+          <div class="pp-row">
+            <span class="pp-label">Body</span>
+            <span class="pp-tag json">JSON · 42 B</span>
+          </div>
+        </div>
+
+        <!-- 选择/新建集合 -->
+        <label class="form-label" style="margin-top: 14px;">保存到集合</label>
+        <div class="form-row">
+          <!-- 集合下拉 -->
+          <div class="cdrop col-cdrop" data-value="user-center" id="col-dd" style="flex:1;">
+            <button class="cdrop-trigger" style="width:100%;">
+              <span class="folder-icon">📁</span>
+              <span class="cdrop-text">用户中心 API</span>
+              <span class="cdrop-caret">▾</span>
+            </button>
+            <div class="cdrop-menu">
+              <div class="cdrop-item selected" data-value="user-center"><span class="folder-icon">📁</span><span>用户中心 API</span></div>
+              <div class="cdrop-item" data-value="orders"><span class="folder-icon">📁</span><span>订单服务</span></div>
+              <div class="cdrop-item" data-value="payment"><span class="folder-icon">📁</span><span>支付网关</span></div>
+              <div class="cdrop-divider"></div>
+              <div class="cdrop-item action" data-value="__new__">
+                <span class="dd-icon">＋</span><span>新建集合…</span>
+              </div>
+            </div>
+          </div>
+          <!-- 请求名称 -->
+          <input type="text" class="input" placeholder="请求名称（默认：URL）" value="POST /v1/users" style="flex:1;" />
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn ghost" id="modal-cancel">取消</button>
+        <button class="btn primary">导入并打开</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
