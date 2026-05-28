@@ -179,6 +179,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 const STORAGE_KEY = "postboy_state_v2";
+const REQUEST_TIMEOUT_MS = 120_000;
+const REQUEST_TIMEOUT_MESSAGE = "请求已超时（超过 120 秒）";
 const BODY_TYPES: BodyType[] = [
   "none",
   "form-data",
@@ -208,13 +210,16 @@ const responseSubTab = ref<ResponseSubTab>("body");
 const responseFormat = ref<ResponseFormat>("pretty");
 const responseLang = ref<ResponseLang>("JSON");
 
-const sending = ref(false);
+const sendingRequestIds = ref<Record<string, true>>({});
 const errorMessage = ref("");
 const responseStatus = ref<number | null>(null);
 const responseTimeMs = ref<number | null>(null);
 const responseSize = ref<number | null>(null);
 const responseHeaders = ref<ResponseHeader[]>([]);
 const responseBody = ref("");
+let sendRunSeq = 0;
+const activeSendRunIds: Record<string, number> = {};
+const sendingTimeouts: Record<string, ReturnType<typeof setTimeout>> = {};
 
 const storagePathLabel = ref("~/.postboy/postboy.db");
 const searchQuery = ref("");
@@ -798,6 +803,9 @@ async function hydrate() {
 const activeRequest = computed<RequestRecord | null>(
   () => requests.value.find((r) => r.id === activeTabId.value) ?? null,
 );
+const isActiveRequestSending = computed(
+  () => !!activeRequest.value && isRequestSending(activeRequest.value.id),
+);
 
 const openTabs = computed(() =>
   openTabIds.value
@@ -1142,11 +1150,109 @@ function applyResponseSnap(resp: HistoryResponse | undefined) {
   errorMessage.value = typeof resp.error === "string" ? resp.error : "";
 }
 
+function isRequestSending(requestId: string): boolean {
+  return !!sendingRequestIds.value[requestId];
+}
+
+function setRequestSending(requestId: string, sending: boolean) {
+  const next = { ...sendingRequestIds.value };
+  if (sending) {
+    next[requestId] = true;
+  } else {
+    delete next[requestId];
+  }
+  sendingRequestIds.value = next;
+}
+
+function clearRequestTimeout(requestId: string) {
+  const timeout = sendingTimeouts[requestId];
+  if (timeout) {
+    clearTimeout(timeout);
+    delete sendingTimeouts[requestId];
+  }
+}
+
+function startRequestSending(requestId: string, onTimeout: () => void | Promise<void>): number {
+  const runId = ++sendRunSeq;
+  activeSendRunIds[requestId] = runId;
+  clearRequestTimeout(requestId);
+  setRequestSending(requestId, true);
+  sendingTimeouts[requestId] = setTimeout(() => {
+    if (activeSendRunIds[requestId] !== runId) return;
+    delete activeSendRunIds[requestId];
+    delete sendingTimeouts[requestId];
+    setRequestSending(requestId, false);
+    void onTimeout();
+  }, REQUEST_TIMEOUT_MS);
+  return runId;
+}
+
+function isCurrentSendRun(requestId: string, runId: number): boolean {
+  return activeSendRunIds[requestId] === runId;
+}
+
+function finishRequestSending(requestId: string, runId: number) {
+  if (!isCurrentSendRun(requestId, runId)) return;
+  delete activeSendRunIds[requestId];
+  clearRequestTimeout(requestId);
+  setRequestSending(requestId, false);
+}
+
+function clearAllRequestTimeouts() {
+  Object.keys(sendingTimeouts).forEach(clearRequestTimeout);
+}
+
+function applyResponseIfActive(requestId: string, resp: HistoryResponse | undefined) {
+  if (activeTabId.value === requestId) {
+    applyResponseSnap(resp);
+  }
+}
+
 function rememberResponse(requestId: string, resp: HistoryResponse) {
   lastResponses.value = { ...lastResponses.value, [requestId]: resp };
 }
 
+async function recordTimeoutResponse(
+  requestId: string,
+  method: HttpMethod,
+  url: string,
+  snapshot: HistorySnapshot,
+) {
+  const responseSnap: HistoryResponse = {
+    status: null,
+    headers: [],
+    body: "",
+    elapsedMs: REQUEST_TIMEOUT_MS,
+    sizeBytes: null,
+    error: REQUEST_TIMEOUT_MESSAGE,
+  };
+  rememberResponse(requestId, responseSnap);
+  applyResponseIfActive(requestId, responseSnap);
+  appendHistoryEntry({
+    id: uuid(),
+    method,
+    url,
+    status: null,
+    timestamp: Date.now(),
+    snapshot,
+    response: responseSnap,
+  });
+  await recordHistoryRemote({
+    request_id: requestId,
+    method,
+    url,
+    status: null,
+    elapsed_ms: REQUEST_TIMEOUT_MS,
+    error: REQUEST_TIMEOUT_MESSAGE,
+    snapshot,
+    response: responseSnap,
+  });
+}
+
 function forgetResponse(requestId: string) {
+  delete activeSendRunIds[requestId];
+  clearRequestTimeout(requestId);
+  setRequestSending(requestId, false);
   if (requestId in lastResponses.value) {
     const next = { ...lastResponses.value };
     delete next[requestId];
@@ -1822,6 +1928,7 @@ interface GrpcResponsePayload {
 async function sendRequest() {
   const req = activeRequest.value;
   if (!req) return;
+  if (isRequestSending(req.id)) return;
   if (req.kind === "grpc") {
     await sendGrpcRequest(req);
     return;
@@ -1830,16 +1937,14 @@ async function sendRequest() {
     errorMessage.value = "请先输入请求 URL";
     return;
   }
-  sending.value = true;
-  errorMessage.value = "";
-  responseBody.value = "";
-  responseHeaders.value = [];
-  responseStatus.value = null;
-  responseTimeMs.value = null;
-  responseSize.value = null;
+  const url = buildEffectiveUrl(req);
+  const snapshot = snapshotFromRequest(req);
+  const runId = startRequestSending(req.id, () =>
+    recordTimeoutResponse(req.id, req.method, url, snapshot),
+  );
+  applyResponseIfActive(req.id, undefined);
 
   try {
-    const url = buildEffectiveUrl(req);
     const headers = buildEffectiveHeaders(req);
     const body = buildEffectiveBody(req);
     const res = await invoke<HttpResponsePayload>("send_http_request", {
@@ -1853,30 +1958,28 @@ async function sendRequest() {
         binary_path: req.bodyType === "binary" ? req.binaryPath : undefined,
       },
     });
-
-    responseStatus.value = res.status;
-    responseTimeMs.value = res.elapsed_ms;
-    responseSize.value = res.size_bytes;
-    responseHeaders.value = res.headers;
-    responseBody.value = res.body;
+    if (!isCurrentSendRun(req.id, runId)) return;
 
     const ct =
       res.headers.find((h) => h.key.toLowerCase() === "content-type")?.value ?? "";
-    if (ct.includes("json")) responseLang.value = "JSON";
-    else if (ct.includes("xml")) responseLang.value = "XML";
-    else if (ct.includes("html")) responseLang.value = "HTML";
-    else responseLang.value = "Text";
+    const lang: ResponseLang = ct.includes("json")
+      ? "JSON"
+      : ct.includes("xml")
+        ? "XML"
+        : ct.includes("html")
+          ? "HTML"
+          : "Text";
 
-    const snapshot = snapshotFromRequest(req);
     const responseSnap: HistoryResponse = {
       status: res.status,
       headers: res.headers.map((h) => ({ ...h })),
       body: res.body,
       elapsedMs: res.elapsed_ms,
       sizeBytes: res.size_bytes,
-      lang: responseLang.value,
+      lang,
     };
     rememberResponse(req.id, responseSnap);
+    applyResponseIfActive(req.id, responseSnap);
     const localEntry: HistoryEntry = {
       id: uuid(),
       method: req.method,
@@ -1898,42 +2001,38 @@ async function sendRequest() {
       response: responseSnap,
     });
   } catch (err) {
+    if (!isCurrentSendRun(req.id, runId)) return;
     const message = String(err);
-    errorMessage.value = message;
-    const req2 = activeRequest.value;
-    if (req2) {
-      const url = buildEffectiveUrl(req2);
-      const snapshot = snapshotFromRequest(req2);
-      const responseSnap: HistoryResponse = {
-        status: null,
-        headers: [],
-        body: "",
-        elapsedMs: null,
-        sizeBytes: null,
-        error: message,
-      };
-      rememberResponse(req2.id, responseSnap);
-      appendHistoryEntry({
-        id: uuid(),
-        method: req2.method,
-        url,
-        status: null,
-        timestamp: Date.now(),
-        snapshot,
-        response: responseSnap,
-      });
-      await recordHistoryRemote({
-        request_id: req2.id,
-        method: req2.method,
-        url,
-        status: null,
-        error: message,
-        snapshot,
-        response: responseSnap,
-      });
-    }
+    const responseSnap: HistoryResponse = {
+      status: null,
+      headers: [],
+      body: "",
+      elapsedMs: null,
+      sizeBytes: null,
+      error: message,
+    };
+    rememberResponse(req.id, responseSnap);
+    applyResponseIfActive(req.id, responseSnap);
+    appendHistoryEntry({
+      id: uuid(),
+      method: req.method,
+      url,
+      status: null,
+      timestamp: Date.now(),
+      snapshot,
+      response: responseSnap,
+    });
+    await recordHistoryRemote({
+      request_id: req.id,
+      method: req.method,
+      url,
+      status: null,
+      error: message,
+      snapshot,
+      response: responseSnap,
+    });
   } finally {
-    sending.value = false;
+    finishRequestSending(req.id, runId);
   }
 }
 
@@ -1952,14 +2051,6 @@ async function sendGrpcRequest(req: RequestRecord) {
     errorMessage.value = "请填写 Service 与 Method 名称";
     return;
   }
-  sending.value = true;
-  errorMessage.value = "";
-  responseBody.value = "";
-  responseHeaders.value = [];
-  responseStatus.value = null;
-  responseTimeMs.value = null;
-  responseSize.value = null;
-
   const metadata: GrpcMetadataPair[] = g.metadata
     .filter((m) => m.enabled && m.key.trim())
     .map((m) => ({
@@ -1975,6 +2066,11 @@ async function sendGrpcRequest(req: RequestRecord) {
   const message = substituteVars(g.message).trim() || "{}";
 
   const summaryUrl = `grpc${g.useTls ? "s" : ""}://${target}/${g.service.trim()}/${g.method.trim()}`;
+  const snapshot = snapshotFromRequest(req);
+  const runId = startRequestSending(req.id, () =>
+    recordTimeoutResponse(req.id, "POST", summaryUrl, snapshot),
+  );
+  applyResponseIfActive(req.id, undefined);
 
   try {
     const res = await invoke<GrpcResponsePayload>("send_grpc_request", {
@@ -1990,19 +2086,8 @@ async function sendGrpcRequest(req: RequestRecord) {
         authority: substituteVars(g.authority).trim() || null,
       },
     });
+    if (!isCurrentSendRun(req.id, runId)) return;
 
-    responseStatus.value = res.status;
-    responseTimeMs.value = res.elapsed_ms;
-    responseSize.value = res.size_bytes;
-    responseHeaders.value = res.headers;
-    responseBody.value = res.body;
-    responseLang.value = "JSON";
-
-    if (res.status !== 0) {
-      errorMessage.value = `gRPC ${res.status} ${res.status_text}`;
-    }
-
-    const snapshot = snapshotFromRequest(req);
     const histStatus = res.status === 0 ? 200 : 500;
     const histErr = res.status === 0 ? undefined : `${res.status} ${res.status_text}`;
     const responseSnap: HistoryResponse = {
@@ -2015,6 +2100,7 @@ async function sendGrpcRequest(req: RequestRecord) {
       error: histErr,
     };
     rememberResponse(req.id, responseSnap);
+    applyResponseIfActive(req.id, responseSnap);
     appendHistoryEntry({
       id: uuid(),
       method: "POST",
@@ -2036,9 +2122,8 @@ async function sendGrpcRequest(req: RequestRecord) {
       response: responseSnap,
     });
   } catch (err) {
+    if (!isCurrentSendRun(req.id, runId)) return;
     const msg = String(err);
-    errorMessage.value = msg;
-    const snapshot = snapshotFromRequest(req);
     const responseSnap: HistoryResponse = {
       status: null,
       headers: [],
@@ -2048,6 +2133,7 @@ async function sendGrpcRequest(req: RequestRecord) {
       error: msg,
     };
     rememberResponse(req.id, responseSnap);
+    applyResponseIfActive(req.id, responseSnap);
     appendHistoryEntry({
       id: uuid(),
       method: "POST",
@@ -2067,7 +2153,7 @@ async function sendGrpcRequest(req: RequestRecord) {
       response: responseSnap,
     });
   } finally {
-    sending.value = false;
+    finishRequestSending(req.id, runId);
   }
 }
 
@@ -2085,6 +2171,9 @@ function prettifyBody() {
 
 const bodyTextareaEl = ref<HTMLTextAreaElement | null>(null);
 const bodyHighlightEl = ref<HTMLPreElement | null>(null);
+let bodySelectionDragFrame = 0;
+let bodySelectionPointerX = 0;
+let isBodySelectionDragging = false;
 
 function syncBodyScroll() {
   const t = bodyTextareaEl.value;
@@ -2092,6 +2181,51 @@ function syncBodyScroll() {
   if (!t || !p) return;
   p.scrollTop = t.scrollTop;
   p.scrollLeft = t.scrollLeft;
+}
+
+function stopBodySelectionDrag() {
+  isBodySelectionDragging = false;
+  if (bodySelectionDragFrame) {
+    cancelAnimationFrame(bodySelectionDragFrame);
+    bodySelectionDragFrame = 0;
+  }
+  window.removeEventListener("mousemove", onBodySelectionMouseMove);
+  window.removeEventListener("mouseup", stopBodySelectionDrag);
+}
+
+function tickBodySelectionDrag() {
+  const t = bodyTextareaEl.value;
+  if (!isBodySelectionDragging || !t) return;
+
+  const rect = t.getBoundingClientRect();
+  const threshold = 36;
+  let deltaX = 0;
+
+  if (bodySelectionPointerX > rect.right - threshold) {
+    deltaX = Math.min(24, Math.max(4, bodySelectionPointerX - (rect.right - threshold)) / 2);
+  } else if (bodySelectionPointerX < rect.left + threshold) {
+    deltaX = -Math.min(24, Math.max(4, rect.left + threshold - bodySelectionPointerX) / 2);
+  }
+
+  if (deltaX) {
+    t.scrollLeft += deltaX;
+  }
+  syncBodyScroll();
+  bodySelectionDragFrame = requestAnimationFrame(tickBodySelectionDrag);
+}
+
+function onBodySelectionMouseMove(event: MouseEvent) {
+  bodySelectionPointerX = event.clientX;
+}
+
+function startBodySelectionDrag(event: MouseEvent) {
+  if (event.button !== 0) return;
+  stopBodySelectionDrag();
+  isBodySelectionDragging = true;
+  bodySelectionPointerX = event.clientX;
+  window.addEventListener("mousemove", onBodySelectionMouseMove);
+  window.addEventListener("mouseup", stopBodySelectionDrag);
+  bodySelectionDragFrame = requestAnimationFrame(tickBodySelectionDrag);
 }
 
 const bodyHighlighted = computed(() => {
@@ -2565,6 +2699,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("click", onGlobalClick);
   window.removeEventListener("mousemove", onDragMove);
   window.removeEventListener("mouseup", onDragEnd);
+  stopBodySelectionDrag();
+  clearAllRequestTimeouts();
 });
 
 const methodLabel = computed(() => activeRequest.value?.method ?? "GET");
@@ -3012,8 +3148,8 @@ function pickImportFolder(id: string) {
                 </div>
               </div>
               <div class="send-group" :class="{ open: openDropdown === 'send' }">
-                <button class="btn primary" :disabled="sending" @click="sendRequest">
-                  {{ sending ? "发送中…" : "Send" }}
+                <button class="btn primary" :disabled="isActiveRequestSending" @click="sendRequest">
+                  {{ isActiveRequestSending ? "发送中…" : "Send" }}
                 </button>
                 <button
                   type="button"
@@ -3055,8 +3191,8 @@ function pickImportFolder(id: string) {
                 <span>TLS</span>
               </label>
               <div class="send-group" :class="{ open: openDropdown === 'send' }">
-                <button class="btn primary" :disabled="sending" @click="sendRequest">
-                  {{ sending ? "发送中…" : "Send" }}
+                <button class="btn primary" :disabled="isActiveRequestSending" @click="sendRequest">
+                  {{ isActiveRequestSending ? "发送中…" : "Send" }}
                 </button>
                 <button
                   type="button"
@@ -3272,6 +3408,7 @@ function pickImportFolder(id: string) {
                     spellcheck="false"
                     :placeholder="'输入请求体（' + activeRequest.rawLang + '）'"
                     @scroll="syncBodyScroll"
+                    @mousedown="startBodySelectionDrag"
                   ></textarea>
                 </div>
               </div>

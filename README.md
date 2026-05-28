@@ -11,3 +11,10 @@ npm run tauri dev
 ```
 
 ## Welcome to try
+
+## Mac安装后无法启动解决方案
+```shell
+xattr -rd com.apple.quarantine /Applications/Postboy.app
+open /Applications/Postboy.app
+```
+
