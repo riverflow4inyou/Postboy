@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <radialGradient id="bg" cx="38%" cy="34%" r="78%">
+      <stop offset="0%" stop-color="#FF8A4C"/>
+      <stop offset="60%" stop-color="#FF6C37"/>
+      <stop offset="100%" stop-color="#E85A22"/>
+    </radialGradient>
+  </defs>
+
+  <!-- 圆形橙色底 -->
+  <circle cx="128" cy="128" r="120" fill="url(#bg)"/>
+
+  <g fill="#FFFFFF" stroke="#FFFFFF" stroke-linejoin="round" stroke-linecap="round">
+
+    <!-- 头发：少年发型，刘海朝左侧倾斜 -->
+    <path d="M104 70
+             Q100 56 116 52
+             Q132 48 146 56
+             Q156 62 154 74
+             Q156 82 150 86
+             L142 82
+             Q138 76 130 76
+             Q120 76 114 82
+             L108 84
+             Q102 80 104 70 Z"/>
+
+    <!-- 头部：圆形，略偏左让脸朝向左 -->
+    <circle cx="124" cy="84" r="18"/>
+
+    <!-- 颈部 -->
+    <rect x="120" y="98" width="10" height="8" rx="2"/>
+
+    <!-- 躯干：垂直站立的身体 -->
+    <path d="M108 106
+             Q104 108 104 116
+             L104 156
+             Q104 162 110 162
+             L140 162
+             Q146 162 146 156
+             L146 116
+             Q146 108 142 106 Z"/>
+
+    <!-- 左臂（朝向观察者这一侧，自然下垂） -->
+    <path d="M108 110
+             Q102 112 100 120
+             L96 154
+             Q96 160 102 160
+             Q108 160 108 154
+             L110 124 Z"/>
+
+    <!-- 右臂（远侧，微微弯曲贴身） -->
+    <path d="M142 110
+             Q148 114 148 122
+             L148 150
+             Q148 156 144 156
+             Q140 156 140 150
+             L138 124 Z"/>
+
+    <!-- 左腿 -->
+    <path d="M110 162
+             Q108 168 110 178
+             L114 208
+             Q114 214 120 214
+             L124 214
+             Q128 214 128 208
+             L128 178
+             Q128 168 126 162 Z"/>
+
+    <!-- 右腿 -->
+    <path d="M128 162
+             Q128 168 130 178
+             L134 208
+             Q134 214 140 214
+             L144 214
+             Q148 214 148 208
+             L148 178
+             Q146 168 144 162 Z"/>
+
+    <!-- 左脚 -->
+    <ellipse cx="118" cy="216" rx="9" ry="4"/>
+    <!-- 右脚 -->
+    <ellipse cx="142" cy="216" rx="9" ry="4"/>
+
+  </g>
+
+  <!-- 面部：朝左 —— 眼睛和嘴在头部偏左位置 -->
+  <g fill="#E85A22">
+    <!-- 眼睛 -->
+    <circle cx="113" cy="84" r="2"/>
+  </g>
+  <g stroke="#E85A22" stroke-width="1.8" stroke-linecap="round" fill="none">
+    <!-- 嘴角微笑 -->
+    <path d="M110 92 Q113 94 116 92"/>
+  </g>
+
+  <!-- 头发高光 -->
+  <path d="M118 56 Q132 52 144 60"
+        stroke="#FFD9C2" stroke-width="1.8" fill="none" stroke-linecap="round" opacity="0.6"/>
+
+  <!-- 地面投影 -->
+  <ellipse cx="130" cy="222" rx="42" ry="4" fill="#000000" opacity="0.15"/>
+</svg>

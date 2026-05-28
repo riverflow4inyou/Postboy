@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import postboyLogo from "./assets/postboy-logo.svg";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 
@@ -1634,9 +1635,19 @@ function onDragEnd() {
   window.removeEventListener("mouseup", onDragEnd);
 }
 
+function isOnScrollbar(event: MouseEvent, target: HTMLElement | null): boolean {
+  if (!target) return false;
+  const hasVScroll = target.scrollHeight > target.clientHeight;
+  const hasHScroll = target.scrollWidth > target.clientWidth;
+  if (hasVScroll && event.offsetX > target.clientWidth) return true;
+  if (hasHScroll && event.offsetY > target.clientHeight) return true;
+  return false;
+}
+
 function startWindowDrag(event: MouseEvent) {
   if (event.button !== 0) return;
   const target = event.target as HTMLElement | null;
+  if (isOnScrollbar(event, target)) return;
   if (
     target?.closest(
       [
@@ -2593,9 +2604,10 @@ function pickImportFolder(id: string) {
       <button
         class="app-title-button no-window-drag"
         type="button"
-        title="点击切换标题"
+        title="点击切换 Postboy / Postgirl"
         @click="toggleAppTitle"
       >
+        <img class="app-logo" :src="postboyLogo" alt="" aria-hidden="true" />
         {{ appTitle }}
       </button>
       <div class="title-actions no-window-drag">
@@ -4015,7 +4027,7 @@ function pickImportFolder(id: string) {
       </div>
     </div>
 
-    <footer class="statusbar">
+    <footer class="statusbar" data-tauri-drag-region>
       <span class="status-dot">●</span>
       <span>已连接</span>
       <span class="dot-sep">·</span>
@@ -4028,6 +4040,8 @@ function pickImportFolder(id: string) {
         <span>{{ responseLang }}</span>
       </div>
     </footer>
+
+    <div class="window-drag-rail right" data-tauri-drag-region aria-hidden="true"></div>
   </div>
 </template>
 
@@ -4139,6 +4153,21 @@ button {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
+}
+
+.window-drag-rail {
+  position: absolute;
+  top: 40px;
+  bottom: 24px;
+  width: 6px;
+  z-index: 50;
+  background: transparent;
+  pointer-events: auto;
+  cursor: default;
+}
+.window-drag-rail.right {
+  right: 0;
 }
 
 /* === 顶部工具栏 === */
@@ -4158,6 +4187,9 @@ button {
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.4px;
@@ -4168,6 +4200,12 @@ button {
 .app-title-button:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+.app-logo {
+  width: 18px;
+  height: 18px;
+  display: block;
+  pointer-events: none;
 }
 .title-actions {
   position: absolute;
@@ -4267,6 +4305,7 @@ body.dragging-y * {
   align-items: stretch;
   padding: 10px 6px;
   gap: 4px;
+  -webkit-app-region: drag;
 }
 .rail-btn {
   background: transparent;
@@ -4283,6 +4322,7 @@ body.dragging-y * {
   font-size: 11px;
   transition: all 0.15s;
   position: relative;
+  -webkit-app-region: no-drag;
 }
 .rail-btn:hover {
   color: var(--text);
@@ -4303,6 +4343,8 @@ body.dragging-y * {
 }
 .rail-spacer {
   flex: 1;
+  min-height: 24px;
+  -webkit-app-region: drag;
 }
 .env-indicator {
   display: flex;
@@ -4312,6 +4354,7 @@ body.dragging-y * {
   color: var(--text-2);
   padding: 8px 0;
   gap: 4px;
+  -webkit-app-region: no-drag;
 }
 .env-indicator .dot {
   width: 8px;
@@ -5564,6 +5607,10 @@ body.dragging-y * {
   font-size: 11px;
   color: var(--text-3);
   gap: 8px;
+  cursor: default;
+}
+.statusbar > * {
+  pointer-events: none;
 }
 .statusbar .status-dot {
   color: var(--green);

@@ -262,6 +262,51 @@ fn storage_path() -> String {
     display
 }
 
+fn app_icon_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("icons/icon.png")
+}
+
+/// Apply icons from disk so dev builds pick up logo changes without relying on
+/// embedded compile-time assets alone (and refresh macOS Dock icon from PNG).
+fn apply_app_icons(handle: &tauri::AppHandle) {
+    let icon_path = app_icon_path();
+    let Ok(icon) = tauri::image::Image::from_path(&icon_path) else {
+        eprintln!(
+            "postboy: failed to load app icon at {}",
+            icon_path.display()
+        );
+        return;
+    };
+
+    if let Some(window) = handle.get_webview_window("main") {
+        let _ = window.set_icon(icon.clone());
+    }
+
+    #[cfg(target_os = "macos")]
+    set_macos_dock_icon(&icon_path);
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_dock_icon(icon_path: &std::path::Path) {
+    use objc2::AllocAnyThread;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    let Ok(bytes) = std::fs::read(icon_path) else {
+        return;
+    };
+
+    let mtm = unsafe { MainThreadMarker::new_unchecked() };
+    let app = NSApplication::sharedApplication(mtm);
+    let data = NSData::with_bytes(&bytes);
+    let Some(icon) = NSImage::initWithData(NSImage::alloc(), &data) else {
+        eprintln!("postboy: failed to decode macOS dock icon PNG");
+        return;
+    };
+    unsafe { app.setApplicationIconImage(Some(&icon)) };
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -284,6 +329,11 @@ pub fn run() {
             clear_history,
             storage_path
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if matches!(event, tauri::RunEvent::Ready) {
+                apply_app_icons(app_handle);
+            }
+        });
 }
