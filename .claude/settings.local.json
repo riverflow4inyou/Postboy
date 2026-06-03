@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check *)",
+      "Bash(npm run *)",
+      "Bash(vue-tsc --noEmit)",
+      "Bash(npx vue-tsc *)",
+      "Bash(curl -v \"https://api.github.com/user\")",
+      "Bash(cat)",
+      "Bash(chmod +x /tmp/sse_test.py)",
+      "Bash(python3 /tmp/sse_test.py)",
+      "Bash(curl -v http://localhost:8888/sse)",
+      "Bash(chmod +x /tmp/sse_simple.sh)",
+      "Bash(nohup /tmp/sse_simple.sh)",
+      "Bash(cargo build *)",
+      "Bash(osascript)",
+      "Bash(screencapture -x /tmp/postboy_screenshot.png)",
+      "Read(//tmp/**)",
+      "Bash(python3 /tmp/test_sse_full.py)",
+      "Bash(curl -v -X POST http://qabp-agent.package.ctripcorp.com/v1/open-api/prd-review/review -H 'Content-Type: application/json' -d '{\"doc_url\": \"https://trip.larkenterprise.com/wiki/RkKSwhbCni2m93kgdOdcv6Xpntf\"}')"
+    ]
+  }
+}

@@ -4,6 +4,7 @@ mod grpc;
 use std::error::Error as StdError;
 use std::path::PathBuf;
 use std::time::Instant;
+use std::time::Duration;
 
 use reqwest::{multipart, Method};
 use serde::{Deserialize, Serialize};
@@ -40,7 +41,7 @@ struct HttpRequestPayload {
     binary_path: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct HttpFormField {
     #[serde(default)]
     enabled: bool,
@@ -70,15 +71,19 @@ struct HttpResponsePayload {
     size_bytes: usize,
 }
 
-#[tauri::command]
-async fn send_http_request(payload: HttpRequestPayload) -> Result<HttpResponsePayload, String> {
+#[derive(Debug, Serialize)]
+struct SseEvent {
+    id: Option<String>,
+    event: Option<String>,
+    data: String,
+}
+
+fn build_http_request(
+    payload: &HttpRequestPayload,
+    client: &reqwest::Client,
+) -> Result<reqwest::RequestBuilder, String> {
     let method = Method::from_bytes(payload.method.as_bytes())
         .map_err(|err| format!("invalid HTTP method: {err}"))?;
-
-    let client = reqwest::Client::builder()
-        .use_rustls_tls()
-        .build()
-        .map_err(|err| format!("failed to build http client: {}", format_error_chain(&err)))?;
 
     let mut request = client.request(method, &payload.url);
 
@@ -101,7 +106,7 @@ async fn send_http_request(payload: HttpRequestPayload) -> Result<HttpResponsePa
     match payload.body_type.as_str() {
         "form-data" => {
             let mut form = multipart::Form::new();
-            for field in payload.form_data {
+            for field in &payload.form_data {
                 if !field.enabled || field.key.trim().is_empty() {
                     continue;
                 }
@@ -112,22 +117,27 @@ async fn send_http_request(payload: HttpRequestPayload) -> Result<HttpResponsePa
                         .as_deref()
                         .filter(|path| !path.trim().is_empty())
                         .ok_or_else(|| format!("form-data field '{key}' has no file selected"))?;
-                    let bytes = tokio::fs::read(path)
-                        .await
+                    let bytes = std::fs::read(path)
                         .map_err(|err| format!("failed to read form-data file '{path}': {err}"))?;
-                    let file_name = field
-                        .file_name
-                        .filter(|name| !name.trim().is_empty())
-                        .or_else(|| {
+                    let file_name = if let Some(fn_provided) = &field.file_name {
+                        if !fn_provided.trim().is_empty() {
+                            fn_provided.clone()
+                        } else {
                             PathBuf::from(path)
                                 .file_name()
                                 .map(|name| name.to_string_lossy().to_string())
-                        })
-                        .unwrap_or_else(|| "file".to_string());
+                                .unwrap_or_else(|| "file".to_string())
+                        }
+                    } else {
+                        PathBuf::from(path)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "file".to_string())
+                    };
                     let part = multipart::Part::bytes(bytes).file_name(file_name);
                     form = form.part(key, part);
                 } else {
-                    form = form.text(key, field.value);
+                    form = form.text(key, field.value.clone());
                 }
             }
             request = request.multipart(form);
@@ -138,19 +148,67 @@ async fn send_http_request(payload: HttpRequestPayload) -> Result<HttpResponsePa
                 .as_deref()
                 .filter(|path| !path.trim().is_empty())
                 .ok_or_else(|| "binary body requires a selected file".to_string())?;
-            let bytes = tokio::fs::read(path)
-                .await
+            let bytes = std::fs::read(path)
                 .map_err(|err| format!("failed to read binary body file '{path}': {err}"))?;
             request = request.body(bytes);
         }
         _ => {
-            if let Some(body) = payload.body {
+            if let Some(body) = &payload.body {
                 if !body.is_empty() {
-                    request = request.body(body);
+                    request = request.body(body.clone());
                 }
             }
         }
     }
+
+    Ok(request)
+}
+
+fn parse_sse_events(body: &str) -> Vec<SseEvent> {
+    let mut events = Vec::new();
+    let mut current_event = SseEvent {
+        id: None,
+        event: None,
+        data: String::new(),
+    };
+
+    for line in body.lines() {
+        if line.is_empty() {
+            if !current_event.data.is_empty() {
+                events.push(current_event);
+                current_event = SseEvent {
+                    id: None,
+                    event: None,
+                    data: String::new(),
+                };
+            }
+        } else if let Some(id_val) = line.strip_prefix("id:") {
+            current_event.id = Some(id_val.trim().to_string());
+        } else if let Some(event_val) = line.strip_prefix("event:") {
+            current_event.event = Some(event_val.trim().to_string());
+        } else if let Some(data_val) = line.strip_prefix("data:") {
+            if !current_event.data.is_empty() {
+                current_event.data.push('\n');
+            }
+            current_event.data.push_str(data_val.trim());
+        }
+    }
+
+    if !current_event.data.is_empty() {
+        events.push(current_event);
+    }
+
+    events
+}
+
+#[tauri::command]
+async fn send_http_request(payload: HttpRequestPayload) -> Result<HttpResponsePayload, String> {
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .build()
+        .map_err(|err| format!("failed to build http client: {}", format_error_chain(&err)))?;
+
+    let request = build_http_request(&payload, &client)?;
 
     let started = Instant::now();
     let response = request
@@ -180,6 +238,68 @@ async fn send_http_request(payload: HttpRequestPayload) -> Result<HttpResponsePa
         body,
         elapsed_ms,
         size_bytes,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct SseStreamResponse {
+    status: u16,
+    headers: Vec<HttpHeader>,
+    events: Vec<SseEvent>,
+    elapsed_ms: u128,
+    is_complete: bool,
+}
+
+#[tauri::command]
+async fn send_http_request_sse(
+    payload: HttpRequestPayload,
+) -> Result<SseStreamResponse, String> {
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .build()
+        .map_err(|err| format!("failed to build http client: {}", format_error_chain(&err)))?;
+
+    let request = build_http_request(&payload, &client)?;
+
+    let started = Instant::now();
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("request failed: {}", format_error_chain(&err)))?;
+
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| HttpHeader {
+            key: name.to_string(),
+            value: value.to_str().unwrap_or("").to_string(),
+        })
+        .collect::<Vec<_>>();
+
+    // For SSE streams, read with a timeout to collect initial events quickly
+    let body_future = response.text();
+
+    let body = tokio::time::timeout(Duration::from_secs(5), body_future)
+        .await
+        .map_err(|_| "SSE stream timeout (5s) - showing collected events".to_string())
+        .and_then(|res| {
+            res.map_err(|err| format!("failed to read response body: {}", format_error_chain(&err)))
+        })
+        .unwrap_or_default();
+
+    let elapsed_ms = started.elapsed().as_millis();
+    let events = parse_sse_events(&body);
+
+    // Check if response looks complete (ended with double newline = end of event)
+    let is_complete = body.ends_with("\n\n") || body.is_empty();
+
+    Ok(SseStreamResponse {
+        status,
+        headers,
+        events,
+        elapsed_ms,
+        is_complete,
     })
 }
 
@@ -320,6 +440,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             send_http_request,
+            send_http_request_sse,
             send_grpc_request,
             parse_proto_services,
             load_state,

@@ -143,6 +143,20 @@ interface HttpResponsePayload {
   size_bytes: number;
 }
 
+interface SseEvent {
+  id?: string;
+  event?: string;
+  data: string;
+}
+
+interface SseStreamResponse {
+  status: number;
+  headers: ResponseHeader[];
+  events: SseEvent[];
+  elapsed_ms: number;
+  is_complete: boolean;
+}
+
 interface ParsedCurl {
   method: HttpMethod;
   url: string;
@@ -1947,21 +1961,66 @@ async function sendRequest() {
   try {
     const headers = buildEffectiveHeaders(req);
     const body = buildEffectiveBody(req);
-    const res = await invoke<HttpResponsePayload>("send_http_request", {
-      payload: {
-        method: req.method,
-        url,
-        headers,
-        body_type: req.bodyType,
-        body,
-        form_data: req.bodyType === "form-data" ? buildEffectiveFormData(req) : [],
-        binary_path: req.bodyType === "binary" ? req.binaryPath : undefined,
-      },
-    });
-    if (!isCurrentSendRun(req.id, runId)) return;
+
+    const requestPayload = {
+      method: req.method,
+      url,
+      headers,
+      body_type: req.bodyType,
+      body,
+      form_data: req.bodyType === "form-data" ? buildEffectiveFormData(req) : [],
+      binary_path: req.bodyType === "binary" ? req.binaryPath : undefined,
+    };
+
+    // Check if this looks like a request for SSE
+    const acceptHeader = headers.find(
+      (h) => h.key.toLowerCase() === "accept"
+    );
+    const contentTypeHeader = headers.find(
+      (h) => h.key.toLowerCase() === "content-type"
+    );
+    const isLikelySse =
+      acceptHeader?.value.includes("text/event-stream") ||
+      contentTypeHeader?.value.includes("text/event-stream") ||
+      req.url.toLowerCase().includes("stream") ||
+      req.url.toLowerCase().includes("sse") ||
+      req.url.toLowerCase().includes("event");
+
+    let responseBody: string;
+    let responseData: any;
+
+    if (isLikelySse) {
+      const sseRes = await invoke<SseStreamResponse>(
+        "send_http_request_sse",
+        { payload: requestPayload }
+      );
+      if (!isCurrentSendRun(req.id, runId)) return;
+      responseData = sseRes;
+      // Format SSE events for display, one per line for better readability
+      responseBody = sseRes.events
+        .map(
+          (evt) =>
+            `${evt.event ? `event: ${evt.event}\n` : ""}${
+              evt.id ? `id: ${evt.id}\n` : ""
+            }data: ${evt.data}`
+        )
+        .join("\n\n");
+      // Add indicator if stream is ongoing
+      if (!sseRes.is_complete && sseRes.events.length > 0) {
+        responseBody += "\n\n[Stream continuing - showing first 5 seconds of events]";
+      }
+    } else {
+      responseData = await invoke<HttpResponsePayload>(
+        "send_http_request",
+        { payload: requestPayload }
+      );
+      if (!isCurrentSendRun(req.id, runId)) return;
+      responseBody = responseData.body;
+    }
 
     const ct =
-      res.headers.find((h) => h.key.toLowerCase() === "content-type")?.value ?? "";
+      responseData.headers.find((h: ResponseHeader) => h.key.toLowerCase() === "content-type")
+        ?.value ?? "";
     const lang: ResponseLang = ct.includes("json")
       ? "JSON"
       : ct.includes("xml")
@@ -1971,11 +2030,11 @@ async function sendRequest() {
           : "Text";
 
     const responseSnap: HistoryResponse = {
-      status: res.status,
-      headers: res.headers.map((h) => ({ ...h })),
-      body: res.body,
-      elapsedMs: res.elapsed_ms,
-      sizeBytes: res.size_bytes,
+      status: responseData.status,
+      headers: responseData.headers.map((h: ResponseHeader) => ({ ...h })),
+      body: responseBody,
+      elapsedMs: responseData.elapsed_ms,
+      sizeBytes: responseBody.length,
       lang,
     };
     rememberResponse(req.id, responseSnap);
@@ -1984,7 +2043,7 @@ async function sendRequest() {
       id: uuid(),
       method: req.method,
       url,
-      status: res.status,
+      status: responseData.status,
       timestamp: Date.now(),
       snapshot,
       response: responseSnap,
@@ -1994,9 +2053,9 @@ async function sendRequest() {
       request_id: req.id,
       method: req.method,
       url,
-      status: res.status,
-      elapsed_ms: res.elapsed_ms,
-      size_bytes: res.size_bytes,
+      status: responseData.status,
+      elapsed_ms: responseData.elapsed_ms,
+      size_bytes: responseBody.length,
       snapshot,
       response: responseSnap,
     });
