@@ -253,8 +253,14 @@ async fn send_grpc_request_inner(payload: GrpcRequestPayload) -> Result<GrpcResp
         }
     }
 
-    let pool = compile_proto(&proto_path, &include_dirs)
-        .context("编译 .proto 失败")?;
+    let pool = {
+        let proto_path = proto_path.clone();
+        let include_dirs = include_dirs.clone();
+        tokio::task::spawn_blocking(move || compile_proto(&proto_path, &include_dirs))
+            .await
+            .map_err(|e| anyhow!("编译任务失败：{e}"))?
+            .context("编译 .proto 失败")?
+    };
 
     let service_name = payload.service.trim();
     let method_name = payload.method.trim();
@@ -300,7 +306,7 @@ async fn send_grpc_request_inner(payload: GrpcRequestPayload) -> Result<GrpcResp
             let headers = metadata_to_headers(response.metadata());
             let message = response.into_inner();
             let json = dynamic_message_to_json(&message)?;
-            let size = json.as_bytes().len();
+            let size = json.len();
             Ok(GrpcResponsePayload {
                 status: 0,
                 status_text: "OK".into(),
@@ -322,7 +328,7 @@ async fn send_grpc_request_inner(payload: GrpcRequestPayload) -> Result<GrpcResp
                 "message": status.message(),
             })
             .to_string();
-            let size = body.as_bytes().len();
+            let size = body.len();
             Ok(GrpcResponsePayload {
                 status: status.code() as i32,
                 status_text: format!("{:?}", status.code()),
@@ -404,18 +410,18 @@ fn apply_metadata(map: &mut MetadataMap, pairs: &[GrpcMetadataPair]) -> Result<(
 
 fn metadata_to_headers(map: &MetadataMap) -> Vec<HttpHeader> {
     map.iter()
-        .filter_map(|kv| match kv {
-            tonic::metadata::KeyAndValueRef::Ascii(k, v) => Some(HttpHeader {
+        .map(|kv| match kv {
+            tonic::metadata::KeyAndValueRef::Ascii(k, v) => HttpHeader {
                 key: k.as_str().to_string(),
                 value: v.to_str().unwrap_or("").to_string(),
-            }),
-            tonic::metadata::KeyAndValueRef::Binary(k, v) => Some(HttpHeader {
+            },
+            tonic::metadata::KeyAndValueRef::Binary(k, v) => HttpHeader {
                 key: k.as_str().to_string(),
                 value: format!(
                     "<binary {} bytes>",
                     v.to_bytes().map(|b| b.len()).unwrap_or(0)
                 ),
-            }),
+            },
         })
         .collect()
 }

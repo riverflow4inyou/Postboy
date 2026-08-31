@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS request (
     body_rows_json TEXT NOT NULL DEFAULT '[]',
     binary_path   TEXT NOT NULL DEFAULT '',
     grpc_json     TEXT NOT NULL DEFAULT '{}',
+    tests         TEXT NOT NULL DEFAULT '',
     sort_order    INTEGER NOT NULL DEFAULT 0,
     updated_at    INTEGER NOT NULL
 );
@@ -63,6 +64,20 @@ CREATE INDEX IF NOT EXISTS idx_history_sent ON history(sent_at DESC);
 CREATE TABLE IF NOT EXISTS kv_setting (
     key    TEXT PRIMARY KEY,
     value  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS flow (
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    mode               TEXT NOT NULL DEFAULT 'sequence',
+    iterations         INTEGER NOT NULL DEFAULT 1,
+    concurrency        INTEGER NOT NULL DEFAULT 1,
+    steps_json         TEXT NOT NULL DEFAULT '[]',
+    data_columns_json  TEXT NOT NULL DEFAULT '[]',
+    data_rows_json     TEXT NOT NULL DEFAULT '[]',
+    sort_order         INTEGER NOT NULL DEFAULT 0,
+    created_at         INTEGER NOT NULL DEFAULT 0,
+    updated_at         INTEGER NOT NULL DEFAULT 0
 );
 "#;
 
@@ -109,6 +124,7 @@ pub async fn init_pool() -> Result<SqlitePool> {
     ensure_request_columns(&pool).await?;
     ensure_environment_columns(&pool).await?;
     ensure_history_columns(&pool).await?;
+    ensure_flow_columns(&pool).await?;
 
     migrate_legacy_json_if_present(&pool).await.ok();
 
@@ -151,6 +167,12 @@ async fn ensure_request_columns(pool: &SqlitePool) -> Result<()> {
             .await
             .context("failed to add request.binary_path column")?;
     }
+    if !names.contains("tests") {
+        sqlx::query("ALTER TABLE request ADD COLUMN tests TEXT NOT NULL DEFAULT ''")
+            .execute(pool)
+            .await
+            .context("failed to add request.tests column")?;
+    }
     Ok(())
 }
 
@@ -172,9 +194,6 @@ async fn ensure_environment_columns(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-/// Idempotent migration that backfills the `snapshot_json` column on the
-/// `history` table for users upgrading from earlier builds that only stored
-/// method/url metadata.
 async fn ensure_history_columns(pool: &SqlitePool) -> Result<()> {
     let rows = sqlx::query("PRAGMA table_info('history')")
         .fetch_all(pool)
@@ -195,6 +214,54 @@ async fn ensure_history_columns(pool: &SqlitePool) -> Result<()> {
             .execute(pool)
             .await
             .context("failed to add history.response_json column")?;
+    }
+    Ok(())
+}
+
+async fn ensure_flow_columns(pool: &SqlitePool) -> Result<()> {
+    let rows = sqlx::query("PRAGMA table_info('flow')")
+        .fetch_all(pool)
+        .await
+        .context("failed to inspect flow schema")?;
+    let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for row in rows {
+        names.insert(row.get::<String, _>("name"));
+    }
+    if !names.contains("mode") {
+        sqlx::query("ALTER TABLE flow ADD COLUMN mode TEXT NOT NULL DEFAULT 'sequence'")
+            .execute(pool)
+            .await
+            .context("failed to add flow.mode column")?;
+    }
+    if !names.contains("iterations") {
+        sqlx::query("ALTER TABLE flow ADD COLUMN iterations INTEGER NOT NULL DEFAULT 1")
+            .execute(pool)
+            .await
+            .context("failed to add flow.iterations column")?;
+    }
+    if !names.contains("concurrency") {
+        sqlx::query("ALTER TABLE flow ADD COLUMN concurrency INTEGER NOT NULL DEFAULT 1")
+            .execute(pool)
+            .await
+            .context("failed to add flow.concurrency column")?;
+    }
+    if !names.contains("steps_json") {
+        sqlx::query("ALTER TABLE flow ADD COLUMN steps_json TEXT NOT NULL DEFAULT '[]'")
+            .execute(pool)
+            .await
+            .context("failed to add flow.steps_json column")?;
+    }
+    if !names.contains("data_columns_json") {
+        sqlx::query("ALTER TABLE flow ADD COLUMN data_columns_json TEXT NOT NULL DEFAULT '[]'")
+            .execute(pool)
+            .await
+            .context("failed to add flow.data_columns_json column")?;
+    }
+    if !names.contains("data_rows_json") {
+        sqlx::query("ALTER TABLE flow ADD COLUMN data_rows_json TEXT NOT NULL DEFAULT '[]'")
+            .execute(pool)
+            .await
+            .context("failed to add flow.data_rows_json column")?;
     }
     Ok(())
 }
@@ -251,7 +318,7 @@ pub async fn load_state_json(pool: &SqlitePool) -> Result<Value> {
 
     let requests: Vec<Value> = sqlx::query(
         "SELECT id, folder_id, name, kind, method, url, params_json, headers_json,
-                body_type, raw_lang, body, body_rows_json, binary_path, grpc_json
+                body_type, raw_lang, body, body_rows_json, binary_path, grpc_json, tests
          FROM request ORDER BY folder_id ASC, sort_order ASC, updated_at ASC",
     )
     .fetch_all(pool)
@@ -283,6 +350,7 @@ pub async fn load_state_json(pool: &SqlitePool) -> Result<Value> {
             "bodyRows": body_rows,
             "binaryPath": row.get::<String, _>("binary_path"),
             "grpc": grpc,
+            "tests": row.get::<String, _>("tests"),
         })
     })
     .collect();
@@ -310,6 +378,38 @@ pub async fn load_state_json(pool: &SqlitePool) -> Result<Value> {
 
     let history = list_history(pool, HISTORY_DEFAULT_LIMIT, 0, None).await?;
 
+    let flows: Vec<Value> = sqlx::query(
+        "SELECT id, name, mode, iterations, concurrency, steps_json,
+                data_columns_json, data_rows_json, created_at, updated_at
+         FROM flow ORDER BY sort_order ASC, updated_at ASC",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|row| {
+        let steps: Value = serde_json::from_str(&row.get::<String, _>("steps_json"))
+            .unwrap_or_else(|_| json!([]));
+        let data_columns: Value = serde_json::from_str(&row.get::<String, _>("data_columns_json"))
+            .unwrap_or_else(|_| json!([]));
+        let data_rows: Value = serde_json::from_str(&row.get::<String, _>("data_rows_json"))
+            .unwrap_or_else(|_| json!([]));
+        let mode = row.get::<String, _>("mode");
+        let mode = if mode.is_empty() { "sequence".to_string() } else { mode };
+        json!({
+            "id": row.get::<String, _>("id"),
+            "name": row.get::<String, _>("name"),
+            "mode": mode,
+            "iterations": row.get::<i64, _>("iterations"),
+            "concurrency": row.get::<i64, _>("concurrency"),
+            "steps": steps,
+            "dataColumns": data_columns,
+            "dataRows": data_rows,
+            "createdAt": row.get::<i64, _>("created_at"),
+            "updatedAt": row.get::<i64, _>("updated_at"),
+        })
+    })
+    .collect();
+
     let settings = load_settings(pool).await?;
     let s = |k: &str| -> Option<&Value> { settings.get(k) };
 
@@ -322,6 +422,8 @@ pub async fn load_state_json(pool: &SqlitePool) -> Result<Value> {
         "openTabIds": s("open_tab_ids").cloned().unwrap_or_else(|| json!([])),
         "activeTabId": s("active_tab_id").cloned().unwrap_or(Value::String(String::new())),
         "history": history,
+        "flows": flows,
+        "activeFlowId": s("active_flow_id").cloned().unwrap_or(Value::String(String::new())),
         "sidebarWidth": s("sidebar_width").cloned().unwrap_or(json!(280)),
         "requestPaneHeight": s("request_pane_height").cloned().unwrap_or(json!(360)),
         "theme": s("theme").cloned().unwrap_or(Value::String("dark".into())),
@@ -366,9 +468,9 @@ pub async fn save_state_json(pool: &SqlitePool, state: &Value) -> Result<()> {
             sqlx::query(
                 "INSERT INTO request (id, folder_id, name, kind, method, url, params_json,
                                       headers_json, body_type, raw_lang, body, body_rows_json,
-                                      binary_path, grpc_json,
+                                      binary_path, grpc_json, tests,
                                       sort_order, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             )
             .bind(string_field(req, "id"))
             .bind(string_field(req, "folderId"))
@@ -384,6 +486,7 @@ pub async fn save_state_json(pool: &SqlitePool, state: &Value) -> Result<()> {
             .bind(body_rows.to_string())
             .bind(string_field(req, "binaryPath"))
             .bind(grpc.to_string())
+            .bind(string_field(req, "tests"))
             .bind(idx as i64)
             .bind(now)
             .execute(&mut *tx)
@@ -415,6 +518,7 @@ pub async fn save_state_json(pool: &SqlitePool, state: &Value) -> Result<()> {
     upsert_setting_tx(&mut tx, "selected_env_id", state.get("selectedEnvId")).await?;
     upsert_setting_tx(&mut tx, "open_tab_ids", state.get("openTabIds")).await?;
     upsert_setting_tx(&mut tx, "active_tab_id", state.get("activeTabId")).await?;
+    upsert_setting_tx(&mut tx, "active_flow_id", state.get("activeFlowId")).await?;
     upsert_setting_tx(&mut tx, "sidebar_width", state.get("sidebarWidth")).await?;
     upsert_setting_tx(
         &mut tx,
@@ -423,6 +527,39 @@ pub async fn save_state_json(pool: &SqlitePool, state: &Value) -> Result<()> {
     )
     .await?;
     upsert_setting_tx(&mut tx, "theme", state.get("theme")).await?;
+
+    sqlx::query("DELETE FROM flow").execute(&mut *tx).await?;
+    if let Some(arr) = state.get("flows").and_then(|v| v.as_array()) {
+        let now = now_ms();
+        for (idx, flow) in arr.iter().enumerate() {
+            let steps = flow.get("steps").cloned().unwrap_or_else(|| json!([]));
+            let data_columns = flow.get("dataColumns").cloned().unwrap_or_else(|| json!([]));
+            let data_rows = flow.get("dataRows").cloned().unwrap_or_else(|| json!([]));
+            let iterations = flow.get("iterations").and_then(|v| v.as_i64()).unwrap_or(1);
+            let concurrency = flow.get("concurrency").and_then(|v| v.as_i64()).unwrap_or(1);
+            let created_at = flow.get("createdAt").and_then(|v| v.as_i64()).unwrap_or(now);
+            let updated_at = flow.get("updatedAt").and_then(|v| v.as_i64()).unwrap_or(now);
+            sqlx::query(
+                "INSERT INTO flow (id, name, mode, iterations, concurrency, steps_json,
+                                   data_columns_json, data_rows_json,
+                                   sort_order, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            )
+            .bind(string_field(flow, "id"))
+            .bind(string_field(flow, "name"))
+            .bind(string_field_or(flow, "mode", "sequence"))
+            .bind(iterations)
+            .bind(concurrency)
+            .bind(steps.to_string())
+            .bind(data_columns.to_string())
+            .bind(data_rows.to_string())
+            .bind(idx as i64)
+            .bind(created_at)
+            .bind(updated_at)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
 
     tx.commit().await?;
     Ok(())
@@ -484,7 +621,7 @@ pub async fn list_history(
     let limit = limit.clamp(1, HISTORY_MAX_STORED);
     let offset = offset.max(0);
     let search = search.unwrap_or_default();
-    let like = format!("%{}%", search);
+    let like = format!("%{}%", escape_like(&search));
 
     let rows = if search.is_empty() {
         sqlx::query(
@@ -500,7 +637,7 @@ pub async fn list_history(
         sqlx::query(
             "SELECT id, request_id, method, url, status, elapsed_ms, size_bytes, error,
                     sent_at, snapshot_json, response_json
-             FROM history WHERE url LIKE ?1 OR method LIKE ?1
+             FROM history WHERE url LIKE ?1 ESCAPE '\\' OR method LIKE ?1 ESCAPE '\\'
              ORDER BY sent_at DESC LIMIT ?2 OFFSET ?3",
         )
         .bind(like)
@@ -548,6 +685,20 @@ pub async fn list_history(
 pub async fn clear_history(pool: &SqlitePool) -> Result<u64> {
     let res = sqlx::query("DELETE FROM history").execute(pool).await?;
     Ok(res.rows_affected())
+}
+
+fn escape_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '\\' | '%' | '_' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 async fn load_settings(pool: &SqlitePool) -> Result<serde_json::Map<String, Value>> {

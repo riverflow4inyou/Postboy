@@ -17,7 +17,8 @@
       "Bash(screencapture -x /tmp/postboy_screenshot.png)",
       "Read(//tmp/**)",
       "Bash(python3 /tmp/test_sse_full.py)",
-      "Bash(curl -v -X POST http://qabp-agent.package.ctripcorp.com/v1/open-api/prd-review/review -H 'Content-Type: application/json' -d '{\"doc_url\": \"https://trip.larkenterprise.com/wiki/RkKSwhbCni2m93kgdOdcv6Xpntf\"}')"
+      "Bash(pkill -f \"target/debug/postboy\")",
+      "Bash(pkill -f \"npm run tauri dev\")",
     ]
   }
 }
