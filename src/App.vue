@@ -7845,6 +7845,12 @@ body.dragging-y * {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+/* Body/JSON 编辑器填满可用高度：内容少时随拖动扩展，内容多时溢出由 .param-content 滚动 */
+.param-content > .body-editor {
+  flex: 1 0 auto;
 }
 .placeholder {
   color: var(--text-3);
@@ -8416,6 +8422,9 @@ body.dragging-y * {
   flex: 1;
   white-space: pre;
   overflow: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 .code.muted {
   color: var(--text-3);
