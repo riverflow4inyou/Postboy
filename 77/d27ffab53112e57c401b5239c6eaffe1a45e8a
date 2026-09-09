@@ -1,0 +1,20 @@
+src/App.vue
+  s_b92c47f2e1b78a::t_480bfba5960896 7848-7853
+  s_b92c47f2e1b78a::t_2236dfe27f5fcf 8425-8427
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.43-trip",
+  "base_commit_sha": "77d27ffab53112e57c401b5239c6eaffe1a45e8a",
+  "prompts": {},
+  "sessions": {
+    "s_b92c47f2e1b78a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "178d4025-342e-472a-a503-936e3b8ede3d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "riverflow4inyou <riverflow4inyou@gmail.com>"
+    }
+  }
+}
